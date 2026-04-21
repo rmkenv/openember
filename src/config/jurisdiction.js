@@ -12,7 +12,7 @@ export const JURISDICTION = {
     -74.006
   ],
   "bbox": {
-    "north": 41.0,
+    "north": 41,
     "south": 40.4,
     "east": -73.7,
     "west": -74.3
@@ -20,7 +20,6 @@ export const JURISDICTION = {
   "zoom": 10,
   "timezone": "America/New_York"
 };
-
 export const NWS = {
   "office": "OKX",
   "grid_x": 33,
@@ -57,7 +56,6 @@ export const NWS = {
   "hourly_url": "https://api.weather.gov/gridpoints/OKX/33,37/forecast/hourly",
   "gridpoint_url": "https://api.weather.gov/gridpoints/OKX/33,37"
 };
-
 export const COOPS_STATIONS = [
   {
     "id": "8518750",
@@ -109,15 +107,7 @@ export const COOPS_STATIONS = [
     }
   }
 ];
-
 export const FLOOD_THRESHOLDS = {
-  "8518750": {
-    "name": "The Battery",
-    "action": 4.5,
-    "minor": 5.5,
-    "moderate": 6.5,
-    "major": 8.5
-  },
   "8516945": {
     "name": "Kings Point",
     "action": 4.5,
@@ -125,8 +115,8 @@ export const FLOOD_THRESHOLDS = {
     "moderate": 6.5,
     "major": 8.5
   },
-  "8531680": {
-    "name": "Sandy Hook",
+  "8518750": {
+    "name": "The Battery",
     "action": 4.5,
     "minor": 5.5,
     "moderate": 6.5,
@@ -138,14 +128,20 @@ export const FLOOD_THRESHOLDS = {
     "minor": 5.5,
     "moderate": 6.5,
     "major": 8.5
+  },
+  "8531680": {
+    "name": "Sandy Hook",
+    "action": 4.5,
+    "minor": 5.5,
+    "moderate": 6.5,
+    "major": 8.5
   }
 };
-
 export const KNOWLEDGE_BASE = {
   "floodZones": {
     "label": "Flood Zones",
     "source": "FEMA / Local",
-    "data": "Zone A: High-risk coastal/tidal flood areas \u2014 Lower Manhattan, Red Hook (Brooklyn), Rockaway Peninsula (Queens), Staten Island east shore.\nZone AE: Special Flood Hazard Areas \u2014 Coney Island, Howard Beach, Broad Channel, southern Staten Island.\nZone VE: Coastal high-hazard with wave action \u2014 Far Rockaway, Breezy Point, Sea Gate.\nZone X (shaded): Moderate flood risk, 0.2% annual chance.\nPost-Sandy (2012): ~88,000 buildings damaged; $19B in damage.\n"
+    "data": "Zone A: High-risk coastal/tidal flood areas — Lower Manhattan, Red Hook (Brooklyn), Rockaway Peninsula (Queens), Staten Island east shore.\nZone AE: Special Flood Hazard Areas — Coney Island, Howard Beach, Broad Channel, southern Staten Island.\nZone VE: Coastal high-hazard with wave action — Far Rockaway, Breezy Point, Sea Gate.\nZone X (shaded): Moderate flood risk, 0.2% annual chance.\nPost-Sandy (2012): ~88,000 buildings damaged; $19B in damage.\n"
   },
   "evacZones": {
     "label": "Evacuation Zones",
@@ -155,12 +151,12 @@ export const KNOWLEDGE_BASE = {
   "criticalInfrastructure": {
     "label": "Critical Infrastructure",
     "source": "Local OEM",
-    "data": "Hospitals: 11 Level 1 Trauma Centers \u2014 Bellevue (Manhattan), Kings County (Brooklyn), Lincoln (Bronx), Staten Island University, Jamaica (Queens).\nPower: ConEd East River substations critical. Underground feeders in Lower Manhattan flooded during Sandy.\nSubway: 245 miles track, 472 stations. 52 stations in flood zones.\nWater: DEP 14 reservoirs, 2 city tunnels. Newtown Creek & North River WWTPs flooded in Sandy.\nAirports: JFK (Zone A/AE), LaGuardia (Zone A).\n"
+    "data": "Hospitals: 11 Level 1 Trauma Centers — Bellevue (Manhattan), Kings County (Brooklyn), Lincoln (Bronx), Staten Island University, Jamaica (Queens).\nPower: ConEd East River substations critical. Underground feeders in Lower Manhattan flooded during Sandy.\nSubway: 245 miles track, 472 stations. 52 stations in flood zones.\nWater: DEP 14 reservoirs, 2 city tunnels. Newtown Creek & North River WWTPs flooded in Sandy.\nAirports: JFK (Zone A/AE), LaGuardia (Zone A).\n"
   },
   "hazardProfiles": {
     "label": "Hazard Profiles",
     "source": "Local HMP",
-    "data": "HURRICANES: Sandy (2012, Cat 1) \u2014 $19B damage. Primary risk: storm surge.\nEXTREME HEAT: 115-150 deaths/year. Protocol at Heat Index >= 100F. 500+ cooling centers.\nFLOODING: Ida 2021 \u2014 13 deaths in basement apartments. 22,000+ miles combined sewer.\nWINTER STORMS: Jonas 2016 \u2014 27 inches, travel ban. 2,300 Sanitation plows.\nEARTHQUAKE: Low risk. Historical 1884 M5.5. Unreinforced masonry stock pre-1930.\nTERRORISM/HAZMAT: Highest-risk US city (DHS). JTTF, NYPD Intelligence, FDNY HazMat.\n"
+    "data": "HURRICANES: Sandy (2012, Cat 1) — $19B damage. Primary risk: storm surge.\nEXTREME HEAT: 115-150 deaths/year. Protocol at Heat Index >= 100F. 500+ cooling centers.\nFLOODING: Ida 2021 — 13 deaths in basement apartments. 22,000+ miles combined sewer.\nWINTER STORMS: Jonas 2016 — 27 inches, travel ban. 2,300 Sanitation plows.\nEARTHQUAKE: Low risk. Historical 1884 M5.5. Unreinforced masonry stock pre-1930.\nTERRORISM/HAZMAT: Highest-risk US city (DHS). JTTF, NYPD Intelligence, FDNY HazMat.\n"
   },
   "resources": {
     "label": "Contacts & Resources",
@@ -168,12 +164,11 @@ export const KNOWLEDGE_BASE = {
     "data": "NYC OEM: 718-422-8700 | nyc.gov/oem | EOC: 165 Cadman Plaza East, Brooklyn\nFDNY: 911 | 718-999-2000 | NYPD: 911 | 646-610-5000\nNYC Health: 311 | FEMA Region 2: 212-680-3600\nNWS OKX: 631-924-0517 | Con Edison: 1-800-75-CONED\nNotify NYC: nyc.gov/notifynyc\n"
   }
 };
-
 export const MAP_LAYERS = {
   "hospitals": {
     "label": "Trauma Centers",
     "color": "#f87171",
-    "icon": "\ud83c\udfe5",
+    "icon": "🏥",
     "features": [
       {
         "name": "Bellevue Hospital",
@@ -222,7 +217,7 @@ export const MAP_LAYERS = {
   "shelters": {
     "label": "Evac Shelters",
     "color": "#60a5fa",
-    "icon": "\ud83c\udfeb",
+    "icon": "🏫",
     "features": [
       {
         "name": "Boys & Girls HS",
@@ -264,34 +259,34 @@ export const MAP_LAYERS = {
   "gauges": {
     "label": "Stream Gauges",
     "color": "#4ade80",
-    "icon": "\ud83d\udce1",
+    "icon": "📡",
     "features": [
       {
         "name": "Battery Park Tidal Gauge",
         "lat": 40.7003,
         "lng": -74.0141,
-        "note": "NOAA 8518750 \u2014 primary NYC surge gauge",
+        "note": "NOAA 8518750 — primary NYC surge gauge",
         "borough": ""
       },
       {
         "name": "Kings Point Tidal Gauge",
         "lat": 40.8105,
         "lng": -73.7659,
-        "note": "NOAA 8516945 \u2014 Long Island Sound",
+        "note": "NOAA 8516945 — Long Island Sound",
         "borough": ""
       },
       {
         "name": "Jamaica Bay (Inwood)",
         "lat": 40.6226,
         "lng": -73.7576,
-        "note": "NOAA tidal \u2014 Zone A monitoring",
+        "note": "NOAA tidal — Zone A monitoring",
         "borough": ""
       },
       {
         "name": "Sandy Hook, NJ",
         "lat": 40.4669,
         "lng": -74.0094,
-        "note": "NOAA 8531680 \u2014 outer harbor reference",
+        "note": "NOAA 8531680 — outer harbor reference",
         "borough": ""
       }
     ]
@@ -299,13 +294,13 @@ export const MAP_LAYERS = {
   "eoc": {
     "label": "EOC / Command",
     "color": "#facc15",
-    "icon": "\ud83c\udfdb",
+    "icon": "🏛",
     "features": [
       {
         "name": "NYC EOC",
         "lat": 40.6967,
         "lng": -73.9896,
-        "note": "Primary EOC \u2014 165 Cadman Plaza East",
+        "note": "Primary EOC — 165 Cadman Plaza East",
         "borough": ""
       },
       {
@@ -327,61 +322,60 @@ export const MAP_LAYERS = {
   "flood_risk": {
     "label": "Flood Risk Areas",
     "color": "#fb923c",
-    "icon": "\ud83d\udca7",
+    "icon": "💧",
     "features": [
       {
         "name": "Red Hook, Brooklyn",
         "lat": 40.6745,
         "lng": -74.0097,
-        "note": "Zone AE \u2014 flooded Sandy 2012",
+        "note": "Zone AE — flooded Sandy 2012",
         "borough": ""
       },
       {
         "name": "Coney Island",
         "lat": 40.5755,
         "lng": -73.9707,
-        "note": "Zone AE \u2014 10ft+ surge Sandy",
+        "note": "Zone AE — 10ft+ surge Sandy",
         "borough": ""
       },
       {
         "name": "Rockaway Peninsula",
         "lat": 40.5874,
         "lng": -73.8261,
-        "note": "Zone VE/AE \u2014 highest surge risk",
+        "note": "Zone VE/AE — highest surge risk",
         "borough": ""
       },
       {
         "name": "Howard Beach",
         "lat": 40.657,
         "lng": -73.8378,
-        "note": "Zone AE \u2014 interior flood risk",
+        "note": "Zone AE — interior flood risk",
         "borough": ""
       },
       {
         "name": "South Beach, SI",
         "lat": 40.5842,
         "lng": -74.0783,
-        "note": "Zone AE \u2014 major Sandy impact",
+        "note": "Zone AE — major Sandy impact",
         "borough": ""
       },
       {
         "name": "Lower Manhattan (FiDi)",
         "lat": 40.7074,
         "lng": -74.0104,
-        "note": "Zone AE \u2014 subway/utility risk",
+        "note": "Zone AE — subway/utility risk",
         "borough": ""
       },
       {
         "name": "Breezy Point",
         "lat": 40.5587,
         "lng": -73.929,
-        "note": "Zone VE \u2014 wave action",
+        "note": "Zone VE — wave action",
         "borough": ""
       }
     ]
   }
 };
-
 export const SOCRATA = {
   "domain": "data.cityofnewyork.us",
   "presets": [
@@ -393,7 +387,7 @@ export const SOCRATA = {
       "lng_col": "longitude",
       "label_col": "complaint_type",
       "color": "#60a5fa",
-      "icon": "\ud83d\udcde",
+      "icon": "📞",
       "desc": "Real-time 311 complaints"
     },
     {
@@ -404,7 +398,7 @@ export const SOCRATA = {
       "lng_col": "longitude",
       "label_col": "incident_type_desc",
       "color": "#f87171",
-      "icon": "\ud83d\ude92",
+      "icon": "🚒",
       "desc": "FDNY incident data"
     },
     {
@@ -415,7 +409,7 @@ export const SOCRATA = {
       "lng_col": "longitude",
       "label_col": "site_name",
       "color": "#34d399",
-      "icon": "\u2744\ufe0f",
+      "icon": "❄️",
       "desc": "Active cooling center locations"
     },
     {
@@ -426,7 +420,7 @@ export const SOCRATA = {
       "lng_col": "longitude",
       "label_col": "facility_name",
       "color": "#facc15",
-      "icon": "\ud83c\udfeb",
+      "icon": "🏫",
       "desc": "Designated hurricane evacuation shelters"
     },
     {
@@ -437,7 +431,7 @@ export const SOCRATA = {
       "lng_col": "longitude",
       "label_col": "ofns_desc",
       "color": "#a78bfa",
-      "icon": "\ud83d\ude94",
+      "icon": "🚔",
       "desc": "NYPD incident reports"
     },
     {
@@ -448,22 +442,20 @@ export const SOCRATA = {
       "lng_col": "longitude",
       "label_col": "development",
       "color": "#fb923c",
-      "icon": "\ud83c\udfe2",
+      "icon": "🏢",
       "desc": "NYCHA public housing developments"
     }
   ]
 };
-
 export const NOAA_STATES = {
   "alerts": "NY",
   "usgs": "NY",
   "fema": "NY"
 };
-
 export const BRANDING = {
   "appTitle": "EMBER",
   "appSubtitle": "Emergency Management Body of Evidence & Resources",
   "jurisdictionLine": "NYC JURISDICTION",
   "primaryColor": "#e8372c",
-  "logoEmoji": "\ud83d\udea8"
+  "logoEmoji": "🚨"
 };
