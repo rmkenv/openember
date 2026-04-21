@@ -70,7 +70,7 @@ def render_wizard():
     with st.expander("🌩 Step 2 — National Weather Service", expanded=False):
         st.caption("EMBER uses the NWS API for alerts, forecasts, and observations. It can auto-discover your office and grid coordinates.")
 
-        if st.button("🔍 Auto-Discover NWS Office from Coordinates", key="discover_nws"):
+        if st.button("🔍 Auto-Discover NWS Office from Coordinates", key="wiz_discover_nws"):
             with st.spinner(f"Querying NWS API for {j_lat:.4f}, {j_lng:.4f}…"):
                 result = discover_nws_office(j_lat, j_lng)
             if result:
@@ -105,7 +105,7 @@ def render_wizard():
     with st.expander("🌊 Step 3 — CO-OPS Tidal Gauges", expanded=False):
         st.caption("Water level gauges power the live map layer and flood status strip. EMBER can discover nearby stations automatically.")
 
-        if st.button("🔍 Auto-Discover CO-OPS Stations in Bounding Box", key="discover_coops"):
+        if st.button("🔍 Auto-Discover CO-OPS Stations in Bounding Box", key="wiz_discover_coops"):
             bbox = {"north": j_north, "south": j_south, "east": j_east, "west": j_west}
             with st.spinner("Querying CO-OPS Metadata API…"):
                 found = discover_coops_stations(bbox, limit=8)
@@ -170,7 +170,7 @@ def render_wizard():
             prev_text = existing.get("knowledge_base", {}).get(key, "")
             kb_values[key] = st.text_area(
                 label, value=prev_text, height=150,
-                placeholder=placeholder, key=f"kb_{key}",
+                placeholder=placeholder, key=f"wiz_kb_{key}",
                 help=f"Write plain text — no markdown needed."
             )
 

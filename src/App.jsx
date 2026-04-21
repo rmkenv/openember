@@ -31,9 +31,17 @@ const CFG = {
 const NWS_ALERT_URL    = _NWS.alert_url    || `https://api.weather.gov/alerts/active?area=${CFG.state}`
 const NWS_FORECAST_URL = _NWS.forecast_url || `https://api.weather.gov/gridpoints/OKX/33,37/forecast`
 const SOCRATA_DOMAIN   = _SOC.domain       || "data.cityofnewyork.us"
-const OLLAMA_HOST      = (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_OLLAMA_HOST  : null) || "https://ollama.com"
-const OLLAMA_MODEL     = (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_OLLAMA_MODEL : null) || "gpt-oss:120b-cloud"
-const OLLAMA_KEY       = (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_OLLAMA_API_KEY : null) || ""
+const OLLAMA_HOST        = import.meta.env?.VITE_OLLAMA_HOST  || "https://ollama.com"
+const OLLAMA_MODEL       = import.meta.env?.VITE_OLLAMA_MODEL || "gpt-oss:120b-cloud"
+const OLLAMA_KEY_ENV     = import.meta.env?.VITE_OLLAMA_API_KEY || ""
+// Runtime key — allows users to paste their key in the browser without a redeploy
+// Stored in sessionStorage so it clears on tab close (never persisted to disk)
+function getRuntimeKey() {
+  try { return sessionStorage.getItem("ember_ollama_key") || OLLAMA_KEY_ENV } catch { return OLLAMA_KEY_ENV }
+}
+function setRuntimeKey(k) {
+  try { sessionStorage.setItem("ember_ollama_key", k) } catch {}
+}
 
 // Default map layers (NYC hardcoded fallback if config not loaded)
 const DEFAULT_MAP_LAYERS = {
@@ -161,15 +169,16 @@ function buildContext(files, apiResults, activeKB) {
   return ctx
 }
 
-async function* streamOllama(messages, context, signal) {
-  if (!OLLAMA_KEY) {
-    yield `⚠ No Ollama API key set.\n\nAdd VITE_OLLAMA_API_KEY to your Vercel environment variables.\nGet a key at: https://ollama.com/settings/keys`
+async function* streamOllama(messages, context, signal, apiKey) {
+  const key = apiKey || getRuntimeKey()
+  if (!key) {
+    yield `⚠ No Ollama API key set.\n\nPaste your key in the field above, or add VITE_OLLAMA_API_KEY to Vercel environment variables.\nGet a free key at: https://ollama.com/settings/keys`
     return
   }
   const system = `You are EMBER — Emergency Management Body of Evidence & Resources — an AI for ${CFG.name} emergency managers.\n\nKNOWLEDGE BASE:\n${context}\n\nRULES: Lead with critical info. Cite sources [NYC OEM] [NWS] [FEMA] [USGS]. Be concise. Never hallucinate.`
   const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
     method:"POST",
-    headers:{"Content-Type":"application/json","Authorization":`Bearer ${OLLAMA_KEY}`},
+    headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},
     body: JSON.stringify({ model:OLLAMA_MODEL, stream:true, messages:[{role:"system",content:system},...messages.slice(-10)] }),
     signal,
   })
@@ -383,8 +392,10 @@ function MapPanel({ activeLayers, showRadar, showWind, liveReadings={}, onMarker
 // ── Main App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [messages, setMessages]         = useState([{role:"assistant",content:`${BRANDING.appTitle} initialized — ${CFG.name}\nBackend: Ollama Cloud · ${OLLAMA_MODEL}${!OLLAMA_KEY?" · ⚠ NO API KEY SET":""}\n\nKnowledge base loaded · Map ready · ESRI search available\nClick a map marker or type a query to begin.`}])
+  const [messages, setMessages]         = useState([{role:"assistant",content:`${BRANDING.appTitle} initialized — ${CFG.name}\nBackend: Ollama Cloud · ${OLLAMA_MODEL}${!getRuntimeKey()?" · ⚠ NO API KEY — paste your key below":""}\n\nKnowledge base loaded · Map ready · ESRI search available\nClick a map marker or type a query to begin.`}])
   const [input, setInput]               = useState("")
+  const [keyInput, setKeyInput]         = useState("")
+  const [runtimeKey, setRuntimeKeyState]= useState(getRuntimeKey)
   const [streaming, setStreaming]       = useState(false)
   const [activeKB, setActiveKB]         = useState(["floodZones","evacZones","criticalInfrastructure","hazardProfiles","resources"])
   const [activeMapLayers, setActiveLayers] = useState(["floodRisk","hospitals","shelters","gauges","eoc"])
@@ -402,6 +413,7 @@ export default function App() {
   const [showQuick, setShowQuick]       = useState(false)
   const [mapWidth, setMapWidth]         = useState(42)
   const [liveReadings, setLiveReadings] = useState({})
+  const setRuntimeKey_ = (k) => { setRuntimeKeyState(k); setRuntimeKey(k); setKeyInput("") }
   const abortRef   = useRef(null)
   const fileInputRef = useRef(null)
   const endRef     = useRef(null)
@@ -445,7 +457,7 @@ export default function App() {
     let full = ""
     setMessages(p=>[...p,{role:"assistant",content:"▋"}])
     try {
-      for await (const token of streamOllama(msgs, ctx, abortRef.current.signal)) {
+      for await (const token of streamOllama(msgs, ctx, abortRef.current.signal, runtimeKey)) {
         full += token
         setMessages(p=>[...p.slice(0,-1),{role:"assistant",content:full+"▋"}])
       }
@@ -488,14 +500,19 @@ export default function App() {
         </div>
         <div style={{display:"flex",gap:14,alignItems:"center",fontSize:9.5}}>
           {statusDot(true,"ACTIVE")}
-          {statusDot(!!OLLAMA_KEY, OLLAMA_KEY?`OLLAMA · ${OLLAMA_MODEL}`:"NO API KEY")}
+          {statusDot(!!runtimeKey, runtimeKey?`OLLAMA · ${OLLAMA_MODEL}`:"NO API KEY")}
           {statusDot(apiStatus==="live"?true:apiStatus==="error"?false:null, apiStatus==="live"?"FEEDS LIVE":apiStatus==="error"?"FEED ERR":"FEEDS IDLE")}
         </div>
       </div>
 
-      {!OLLAMA_KEY && (
+      {!runtimeKey && (
         <div style={{flexShrink:0,background:"#1a0808",borderBottom:"1px solid #3a1010",padding:"5px 18px",fontSize:10,color:"#f87171"}}>
-          ⚠ No Ollama API key — set VITE_OLLAMA_API_KEY in Vercel environment variables · <a href="https://ollama.com/settings/keys" target="_blank" rel="noopener noreferrer" style={{color:"#f87171"}}>Get key</a>
+          ⚠ No Ollama API key — <a href="https://ollama.com/settings/keys" target="_blank" rel="noopener noreferrer" style={{color:"#f87171"}}>get a free key</a>, then paste it here:
+          <span style={{display:"inline-flex",gap:6,alignItems:"center",marginLeft:8}}>
+            <input value={keyInput} onChange={e=>setKeyInput(e.target.value)} placeholder="sk-..." type="password"
+              style={{background:"#1a0808",border:"1px solid #f8717144",borderRadius:4,padding:"2px 8px",color:"#f87171",fontFamily:"monospace",fontSize:10,outline:"none",width:220}}/>
+            <button onClick={()=>{setRuntimeKey_(keyInput)}} style={{padding:"2px 10px",borderRadius:4,background:"#e8372c",border:"none",color:"#fff",fontFamily:"monospace",fontSize:10,fontWeight:700,cursor:"pointer"}}>Save</button>
+          </span>
         </div>
       )}
 
