@@ -34,8 +34,62 @@ const SOCRATA_DOMAIN   = _SOC.domain       || "data.cityofnewyork.us"
 const OLLAMA_HOST        = import.meta.env?.VITE_OLLAMA_HOST  || "https://ollama.com"
 const OLLAMA_MODEL       = import.meta.env?.VITE_OLLAMA_MODEL || "gpt-oss:120b-cloud"
 const OLLAMA_KEY_ENV     = import.meta.env?.VITE_OLLAMA_API_KEY || ""
-// Runtime key — allows users to paste their key in the browser without a redeploy
-// Stored in sessionStorage so it clears on tab close (never persisted to disk)
+
+// ── localStorage config — persists across sessions, overrides build-time defaults ──
+const LS_KEY = "ember_config_v1"
+
+function loadLocalConfig() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}") } catch { return {} }
+}
+function saveLocalConfig(cfg) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(cfg)) } catch {}
+}
+function clearLocalConfig() {
+  try { localStorage.removeItem(LS_KEY) } catch {}
+}
+
+// Merge: localStorage values override build-time values
+function buildRuntimeConfig(local) {
+  const j = local.jurisdiction || {}
+  return {
+    name:      j.name      || _J.name      || "New York City",
+    shortName: j.shortName || _J.short_name|| "NYC",
+    state:     (j.state    || _J.state     || "NY").toUpperCase(),
+    center:    j.center    || _J.center    || [40.7128, -74.006],
+    zoom:      j.zoom      || _J.zoom      || 10,
+    nwsOffice: j.nwsOffice || _NWS.office  || "OKX",
+    nwsGridX:  j.nwsGridX  != null ? j.nwsGridX : (_NWS.grid_x  || 33),
+    nwsGridY:  j.nwsGridY  != null ? j.nwsGridY : (_NWS.grid_y  || 37),
+    socrataDomain: j.socrataDomain || _SOC.domain || "data.cityofnewyork.us",
+  }
+}
+
+function buildRuntimeKB(local) {
+  const lkb = local.kb || {}
+  return {
+    floodZones:             { label:"Flood Zones",             source:"FEMA / Local", data: lkb.floodZones             || _KB.floodZones?.data             || DEFAULT_KB_TEXT.floodZones },
+    evacZones:              { label:"Evacuation Zones",        source:"Local OEM",    data: lkb.evacZones              || _KB.evacZones?.data              || DEFAULT_KB_TEXT.evacZones },
+    criticalInfrastructure: { label:"Critical Infrastructure", source:"Local OEM",    data: lkb.criticalInfrastructure || _KB.criticalInfrastructure?.data  || DEFAULT_KB_TEXT.criticalInfrastructure },
+    hazardProfiles:         { label:"Hazard Profiles",         source:"Local HMP",    data: lkb.hazardProfiles         || _KB.hazardProfiles?.data         || DEFAULT_KB_TEXT.hazardProfiles },
+    resources:              { label:"Contacts & Resources",    source:"Local OEM",    data: lkb.resources              || _KB.resources?.data              || DEFAULT_KB_TEXT.resources },
+  }
+}
+
+function buildRuntimeMapLayers(local) {
+  if (local.mapLayers && Object.keys(local.mapLayers).length) return local.mapLayers
+  if (Object.keys(_ML).length) return _ML
+  return DEFAULT_MAP_LAYERS
+}
+
+const DEFAULT_KB_TEXT = {
+  floodZones: "Zone A: High-risk coastal/tidal flood areas.\nZone AE: Special Flood Hazard Areas.\nZone VE: Coastal high-hazard with wave action.\nAdd your jurisdiction's specific flood zone details here.",
+  evacZones: "Describe your evacuation zone system here.\nInclude zone names, trigger conditions, shelter locations, and contraflow routes.",
+  criticalInfrastructure: "List key hospitals (with trauma level), power substations, water/wastewater plants, transit hubs.\nNote any facilities in flood zones.",
+  hazardProfiles: "Describe primary hazards for your jurisdiction.\nInclude historical events and typical impacts.",
+  resources: "Emergency Management: [phone] | [website]\nFire: 911 | Police: 911\nAdd your local emergency contacts here.",
+}
+
+// Runtime key
 function getRuntimeKey() {
   try { return sessionStorage.getItem("ember_ollama_key") || OLLAMA_KEY_ENV } catch { return OLLAMA_KEY_ENV }
 }
@@ -153,8 +207,12 @@ function summarizeAPIData(r) {
 }
 
 function buildContext(files, apiResults, activeKB) {
-  let ctx = `=== ${CFG.name.toUpperCase()} EMERGENCY MANAGEMENT KNOWLEDGE BASE ===\n\n`
-  for (const [key, mod] of Object.entries(KNOWLEDGE_BASE)) {
+  return buildContextRT(files, apiResults, activeKB, buildRuntimeKB(loadLocalConfig()), buildRuntimeConfig(loadLocalConfig()).name)
+}
+
+function buildContextRT(files, apiResults, activeKB, kb, jurisdictionName) {
+  let ctx = `=== ${(jurisdictionName||"MY CITY").toUpperCase()} EMERGENCY MANAGEMENT KNOWLEDGE BASE ===\n\n`
+  for (const [key, mod] of Object.entries(kb)) {
     if (activeKB.includes(key)) ctx += `--- ${mod.label} [${mod.source}] ---\n${mod.data}\n\n`
   }
   if (apiResults.length) {
@@ -171,29 +229,61 @@ function buildContext(files, apiResults, activeKB) {
 
 async function* streamOllama(messages, context, signal, apiKey) {
   const key = apiKey || getRuntimeKey()
-  if (!key) {
-    yield `⚠ No Ollama API key set.\n\nPaste your key in the field above, or add VITE_OLLAMA_API_KEY to Vercel environment variables.\nGet a free key at: https://ollama.com/settings/keys`
+
+  // Build the system prompt + message array
+  const system = `You are EMBER — Emergency Management Body of Evidence & Resources — an AI for ${CFG.name} emergency managers.\n\nKNOWLEDGE BASE:\n${context}\n\nRULES: Lead with critical info. Cite sources [NYC OEM] [NWS] [FEMA] [USGS]. Be concise. Never hallucinate.`
+  const allMessages = [
+    { role: "system", content: system },
+    ...messages.slice(-10),
+  ]
+
+  // Use the server-side proxy (/api/chat) to avoid CORS.
+  // Pass the user's runtime key as a header if not baked in at build time.
+  const headers = { "Content-Type": "application/json" }
+  if (key && !import.meta.env?.VITE_OLLAMA_API_KEY) {
+    headers["x-ollama-key"] = key
+  }
+
+  let res
+  try {
+    res = await fetch("/api/chat", {
+      method:  "POST",
+      headers,
+      body:    JSON.stringify({ messages: allMessages, model: OLLAMA_MODEL }),
+      signal,
+    })
+  } catch (e) {
+    yield `⚠ Network error: ${e.message}\n\nMake sure the app is deployed on Vercel (the /api/chat proxy is required). It won't work on a plain static host.`
     return
   }
-  const system = `You are EMBER — Emergency Management Body of Evidence & Resources — an AI for ${CFG.name} emergency managers.\n\nKNOWLEDGE BASE:\n${context}\n\nRULES: Lead with critical info. Cite sources [NYC OEM] [NWS] [FEMA] [USGS]. Be concise. Never hallucinate.`
-  const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
-    method:"POST",
-    headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},
-    body: JSON.stringify({ model:OLLAMA_MODEL, stream:true, messages:[{role:"system",content:system},...messages.slice(-10)] }),
-    signal,
-  })
-  if (!res.ok) { yield `⚠ Ollama error ${res.status}: ${await res.text().catch(()=>"")}` ; return }
+
+  if (!res.ok) {
+    let errMsg = `HTTP ${res.status}`
+    try { const j = await res.json() ; errMsg = j.error || errMsg } catch {}
+    if (res.status === 401) {
+      yield `⚠ No API key configured.\n\nGo to your Vercel dashboard → Project → Settings → Environment Variables and add:\n  OLLAMA_API_KEY = your_key_here\n\nGet a free key at: https://ollama.com/settings/keys\n\nThen redeploy.`
+    } else {
+      yield `⚠ Ollama error: ${errMsg}`
+    }
+    return
+  }
+
+  // Stream NDJSON lines from the proxy
   const reader = res.body.getReader()
   const dec = new TextDecoder()
   let buf = ""
   while (true) {
-    const {done, value} = await reader.read()
+    const { done, value } = await reader.read()
     if (done) break
-    buf += dec.decode(value, {stream:true})
+    buf += dec.decode(value, { stream: true })
     const lines = buf.split("\n") ; buf = lines.pop()
     for (const line of lines) {
       if (!line.trim()) continue
-      try { const obj = JSON.parse(line) ; if (obj.message?.content) yield obj.message.content ; if (obj.done) return } catch {}
+      try {
+        const obj = JSON.parse(line)
+        if (obj.message?.content) yield obj.message.content
+        if (obj.done) return
+      } catch {}
     }
   }
 }
@@ -392,7 +482,24 @@ function MapPanel({ activeLayers, showRadar, showWind, liveReadings={}, onMarker
 // ── Main App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [messages, setMessages]         = useState([{role:"assistant",content:`${BRANDING.appTitle} initialized — ${CFG.name}\nBackend: Ollama Cloud · ${OLLAMA_MODEL}${!getRuntimeKey()?" · ⚠ NO API KEY — paste your key below":""}\n\nKnowledge base loaded · Map ready · ESRI search available\nClick a map marker or type a query to begin.`}])
+  // ── Runtime config (localStorage overrides build-time defaults) ───────────
+  const [localConfig, setLocalConfig] = useState(loadLocalConfig)
+  const CFG_RT  = buildRuntimeConfig(localConfig)
+  const KB_RT   = buildRuntimeKB(localConfig)
+  const ML_RT   = buildRuntimeMapLayers(localConfig)
+  const LIVE_ENDPOINTS_RT = [
+    {name:`NWS Alerts — ${CFG_RT.state}`,      url:`https://api.weather.gov/alerts/active?area=${CFG_RT.state}`,                                                               type:"weather"},
+    {name:`NWS Forecast — ${CFG_RT.shortName}`, url:`https://api.weather.gov/gridpoints/${CFG_RT.nwsOffice}/${CFG_RT.nwsGridX},${CFG_RT.nwsGridY}/forecast`,                  type:"forecast"},
+    {name:"USGS Stream Gauges",                  url:`https://waterservices.usgs.gov/nwis/iv/?format=json&stateCd=${CFG_RT.state.toLowerCase()}&parameterCd=00065&siteStatus=active`, type:"flood"},
+    {name:"FEMA Disasters",                      url:`https://www.fema.gov/api/open/v2/disasterDeclarationsSummaries?state=${CFG_RT.state}&$top=10&$orderby=declarationDate%20desc`, type:"fema"},
+  ]
+
+  const saveConfig = (updates) => {
+    const merged = { ...localConfig, ...updates }
+    setLocalConfig(merged)
+    saveLocalConfig(merged)
+  }
+  const [messages, setMessages]         = useState([{role:"assistant",content:`${BRANDING.appTitle} initialized — ${CFG_RT.name} (${CFG_RT.state})\nBackend: Ollama Cloud · ${OLLAMA_MODEL}${!getRuntimeKey()?" · ⚠ NO API KEY":""  }\n\nKnowledge base loaded · Map ready\nUse ⚙️ Settings tab to change jurisdiction, KB text, and map points.`}])
   const [input, setInput]               = useState("")
   const [keyInput, setKeyInput]         = useState("")
   const [runtimeKey, setRuntimeKeyState]= useState(getRuntimeKey)
@@ -422,7 +529,7 @@ export default function App() {
 
   const fetchAPIs = async () => {
     setFetching(true)
-    const results = await Promise.all(LIVE_ENDPOINTS.map(fetchLiveData))
+    const results = await Promise.all(LIVE_ENDPOINTS_RT.map(fetchLiveData))
     setApiResults(results)
     setApiStatus(results.some(r=>r.success)?"live":"error")
     // Extract live readings for map
@@ -450,7 +557,7 @@ export default function App() {
     setStreaming(true)
     abortRef.current?.abort()
     abortRef.current = new AbortController()
-    const ctx = buildContext(files, apiResults, activeKB)
+    const ctx = buildContextRT(files, apiResults, activeKB, KB_RT, CFG_RT.name)
       + (noaaItems.length ? "--- NOAA DATA ---\n"+noaaItems.map(i=>i.content).join("\n\n")+"\n\n" : "")
       + (esriItems.length ? "--- ESRI LAYERS ---\n"+esriItems.map(i=>i.content).join("\n\n")+"\n" : "")
     const msgs = [...messages, userMsg].map(m=>({role:m.role,content:m.content}))
@@ -496,7 +603,7 @@ export default function App() {
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{width:26,height:26,background:BRANDING.primaryColor,borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,color:"#fff"}}>E</div>
           <span style={{fontWeight:700,letterSpacing:"0.14em",fontSize:14,color:"#fff"}}>{BRANDING.appTitle}</span>
-          <span style={{fontSize:9,color:"#2a2e3a",letterSpacing:"0.06em"}}>{BRANDING.jurisdictionLine} · v2.0</span>
+          <span style={{fontSize:9,color:"#2a2e3a",letterSpacing:"0.06em"}}>{CFG_RT.name.toUpperCase()} · {CFG_RT.state} · v2.0</span>
         </div>
         <div style={{display:"flex",gap:14,alignItems:"center",fontSize:9.5}}>
           {statusDot(true,"ACTIVE")}
@@ -506,13 +613,14 @@ export default function App() {
       </div>
 
       {!runtimeKey && (
-        <div style={{flexShrink:0,background:"#1a0808",borderBottom:"1px solid #3a1010",padding:"5px 18px",fontSize:10,color:"#f87171"}}>
-          ⚠ No Ollama API key — <a href="https://ollama.com/settings/keys" target="_blank" rel="noopener noreferrer" style={{color:"#f87171"}}>get a free key</a>, then paste it here:
-          <span style={{display:"inline-flex",gap:6,alignItems:"center",marginLeft:8}}>
-            <input value={keyInput} onChange={e=>setKeyInput(e.target.value)} placeholder="sk-..." type="password"
-              style={{background:"#1a0808",border:"1px solid #f8717144",borderRadius:4,padding:"2px 8px",color:"#f87171",fontFamily:"monospace",fontSize:10,outline:"none",width:220}}/>
-            <button onClick={()=>{setRuntimeKey_(keyInput)}} style={{padding:"2px 10px",borderRadius:4,background:"#e8372c",border:"none",color:"#fff",fontFamily:"monospace",fontSize:10,fontWeight:700,cursor:"pointer"}}>Save</button>
+        <div style={{flexShrink:0,background:"#1a0808",borderBottom:"1px solid #3a1010",padding:"5px 18px",fontSize:10,color:"#f87171",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span>⚠ No Ollama API key — add <code style={{background:"#2a0808",padding:"1px 5px",borderRadius:3}}>OLLAMA_API_KEY</code> to Vercel env vars &amp; redeploy ·{" "}
+            <a href="https://ollama.com/settings/keys" target="_blank" rel="noopener noreferrer" style={{color:"#f87171"}}>Get a free key</a>
           </span>
+          <span style={{color:"#556",fontSize:9}}>or enter for this session:</span>
+          <input value={keyInput} onChange={e=>setKeyInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&setRuntimeKey_(keyInput)} placeholder="sk-..." type="password"
+            style={{background:"#1a0808",border:"1px solid #f8717144",borderRadius:4,padding:"2px 8px",color:"#f87171",fontFamily:"monospace",fontSize:10,outline:"none",width:180}}/>
+          <button onClick={()=>setRuntimeKey_(keyInput)} style={{padding:"2px 10px",borderRadius:4,background:"#e8372c",border:"none",color:"#fff",fontFamily:"monospace",fontSize:10,fontWeight:700,cursor:"pointer"}}>Save</button>
         </div>
       )}
 
@@ -541,7 +649,7 @@ export default function App() {
 
         {/* Map panel */}
         <div style={{width:`${mapWidth}%`,flexShrink:0,borderRight:"1px solid #111820",position:"relative"}}>
-          <MapPanel activeLayers={activeMapLayers} showRadar={showRadar} showWind={showWind} liveReadings={liveReadings} onMarkerClick={m=>{setRightTab("chat");sendQuery(`Tell me about emergency considerations for ${m.name} — ${m.note}`)}} />
+          <MapPanel activeLayers={activeMapLayers} showRadar={showRadar} showWind={showWind} liveReadings={liveReadings} onMarkerClick={m=>{setRightTab("chat");sendQuery(`Tell me about emergency considerations for ${m.name} — ${m.note}`)}} mapLayers={ML_RT} />
           {/* Resize handle */}
           <div onMouseDown={e=>{
             const startX=e.clientX,startW=mapWidth
@@ -556,7 +664,7 @@ export default function App() {
 
           {/* Tab bar */}
           <div style={{flexShrink:0,display:"flex",borderBottom:"1px solid #111820",background:"#090c12"}}>
-            {[{id:"chat",label:"💬 CHAT"},{id:"noaa",label:"📡 NOAA"},{id:"esri",label:"⊕ ESRI"}].map(t=>(
+            {[{id:"chat",label:"💬 CHAT"},{id:"noaa",label:"📡 NOAA"},{id:"esri",label:"⊕ ESRI"},{id:"settings",label:"⚙️ SETTINGS"}].map(t=>(
               <button key={t.id} onClick={()=>setRightTab(t.id)} style={{padding:"8px 18px",background:rightTab===t.id?"#0d1117":"transparent",color:rightTab===t.id?"#e0e0e8":"#334",border:"none",borderBottom:rightTab===t.id?"2px solid #4ade80":"2px solid transparent",fontFamily:"inherit",fontSize:10,fontWeight:700,cursor:"pointer",letterSpacing:"0.06em"}}>
                 {t.label}
               </button>
@@ -658,6 +766,15 @@ export default function App() {
               setMessages(p=>[...p,{role:"assistant",content:`✓ ESRI layer added: ${item.name}. Try: "What does this layer cover?"`}])
               setRightTab("chat")
             }} esriItems={esriItems} onRemove={i=>setEsriItems(p=>p.filter((_,j)=>j!==i))}/>
+          )}
+
+          {/* Settings tab */}
+          {rightTab==="settings" && (
+            <SettingsPanel
+              localConfig={localConfig}
+              onSave={saveConfig}
+              onReset={()=>{ clearLocalConfig(); setLocalConfig({}); window.location.reload() }}
+            />
           )}
 
         </div>
@@ -779,6 +896,232 @@ function ESRIPanel({onInject, esriItems, onRemove}) {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Settings Panel ────────────────────────────────────────────────────────────
+function SettingsPanel({ localConfig, onSave, onReset }) {
+  const lc = localConfig || {}
+  const lj = lc.jurisdiction || {}
+  const lkb = lc.kb || {}
+  const lml = lc.mapLayers || {}
+
+  // Section visibility
+  const [section, setSection] = useState("jurisdiction")
+
+  // Jurisdiction form state
+  const [jName,     setJName]     = useState(lj.name      || _J.name      || "New York City")
+  const [jShort,    setJShort]    = useState(lj.shortName || _J.short_name || "NYC")
+  const [jState,    setJState]    = useState(lj.state     || _J.state     || "NY")
+  const [jLat,      setJLat]      = useState(lj.center?.[0] ?? (_J.center?.[0] ?? 40.7128))
+  const [jLng,      setJLng]      = useState(lj.center?.[1] ?? (_J.center?.[1] ?? -74.006))
+  const [jZoom,     setJZoom]     = useState(lj.zoom      ?? (_J.zoom     ?? 10))
+  const [jOffice,   setJOffice]   = useState(lj.nwsOffice || _NWS.office  || "OKX")
+  const [jGX,       setJGX]       = useState(lj.nwsGridX  ?? (_NWS.grid_x ?? 33))
+  const [jGY,       setJGY]       = useState(lj.nwsGridY  ?? (_NWS.grid_y ?? 37))
+  const [jSocrata,  setJSocrata]  = useState(lj.socrataDomain || _SOC.domain || "data.cityofnewyork.us")
+  const [discovering, setDiscovering] = useState(false)
+  const [discoverMsg, setDiscoverMsg] = useState("")
+
+  // KB form state
+  const [kbFlood,    setKbFlood]    = useState(lkb.floodZones             || _KB.floodZones?.data             || DEFAULT_KB_TEXT.floodZones)
+  const [kbEvac,     setKbEvac]     = useState(lkb.evacZones              || _KB.evacZones?.data              || DEFAULT_KB_TEXT.evacZones)
+  const [kbInfra,    setKbInfra]    = useState(lkb.criticalInfrastructure || _KB.criticalInfrastructure?.data  || DEFAULT_KB_TEXT.criticalInfrastructure)
+  const [kbHazard,   setKbHazard]   = useState(lkb.hazardProfiles         || _KB.hazardProfiles?.data         || DEFAULT_KB_TEXT.hazardProfiles)
+  const [kbResources,setKbResources]= useState(lkb.resources              || _KB.resources?.data              || DEFAULT_KB_TEXT.resources)
+
+  // Map points state — editable table per category
+  const defaultFeatures = (key) => ((_ML[key]?.features || DEFAULT_MAP_LAYERS[key]?.features || []).map(f => ({...f})))
+  const [mpHospitals, setMpHospitals] = useState(lml.hospitals?.features  || defaultFeatures("hospitals"))
+  const [mpShelters,  setMpShelters]  = useState(lml.shelters?.features   || defaultFeatures("shelters"))
+  const [mpGauges,    setMpGauges]    = useState(lml.gauges?.features     || defaultFeatures("gauges"))
+  const [mpEoc,       setMpEoc]       = useState(lml.eoc?.features        || defaultFeatures("eoc"))
+  const [mpFlood,     setMpFlood]     = useState(lml.floodRisk?.features  || defaultFeatures("floodRisk"))
+
+  const [saved, setSaved] = useState(false)
+
+  const handleSave = () => {
+    onSave({
+      jurisdiction: { name:jName, shortName:jShort, state:jState.toUpperCase(), center:[parseFloat(jLat),parseFloat(jLng)], zoom:parseInt(jZoom), nwsOffice:jOffice.toUpperCase(), nwsGridX:parseInt(jGX), nwsGridY:parseInt(jGY), socrataDomain:jSocrata },
+      kb: { floodZones:kbFlood, evacZones:kbEvac, criticalInfrastructure:kbInfra, hazardProfiles:kbHazard, resources:kbResources },
+      mapLayers: {
+        hospitals: { label:"Trauma Centers", color:"#f87171", icon:"🏥", features:mpHospitals },
+        shelters:  { label:"Evac Shelters",   color:"#60a5fa", icon:"🏫", features:mpShelters  },
+        gauges:    { label:"Stream Gauges",   color:"#4ade80", icon:"📡", features:mpGauges    },
+        eoc:       { label:"EOC / Command",   color:"#facc15", icon:"🏛", features:mpEoc       },
+        floodRisk: { label:"Flood Risk",      color:"#fb923c", icon:"💧", features:mpFlood     },
+      }
+    })
+    setSaved(true)
+    setTimeout(() => { setSaved(false); window.location.reload() }, 1200)
+  }
+
+  const discoverNWS = async () => {
+    setDiscovering(true)
+    setDiscoverMsg("Querying NWS API…")
+    try {
+      const r = await fetch(`https://api.weather.gov/points/${jLat},${jLng}`, { headers:{"User-Agent":"EMBER/1.0"} })
+      const d = await r.json()
+      const p = d.properties || {}
+      setJOffice(p.cwa || jOffice)
+      setJGX(p.gridX || jGX)
+      setJGY(p.gridY || jGY)
+      setDiscoverMsg(`✓ Found: ${p.cwa} grid (${p.gridX},${p.gridY})`)
+    } catch(e) {
+      setDiscoverMsg("✗ Could not reach NWS API. Enter values manually.")
+    }
+    setDiscovering(false)
+  }
+
+  const inp = (val, set, type="text", placeholder="") => (
+    <input value={val} type={type} placeholder={placeholder}
+      onChange={e => set(type==="number" ? parseFloat(e.target.value)||0 : e.target.value)}
+      style={{background:"#0d1117",border:"1px solid #1a1e28",borderRadius:4,padding:"5px 8px",color:"#e0e0e8",fontFamily:"monospace",fontSize:11,outline:"none",width:"100%"}} />
+  )
+  const ta = (val, set, rows=4) => (
+    <textarea value={val} rows={rows} onChange={e=>set(e.target.value)}
+      style={{background:"#0d1117",border:"1px solid #1a1e28",borderRadius:4,padding:"6px 8px",color:"#e0e0e8",fontFamily:"monospace",fontSize:10,outline:"none",width:"100%",resize:"vertical",lineHeight:1.5}} />
+  )
+  const label = (text) => <div style={{fontSize:9,color:"#556",fontWeight:700,letterSpacing:"0.06em",marginBottom:3,marginTop:8}}>{text}</div>
+  const sectionBtn = (id, lbl) => (
+    <button onClick={()=>setSection(id)} style={{padding:"5px 12px",borderRadius:4,fontSize:9.5,fontWeight:700,border:`1px solid ${section===id?"#4ade8066":"#1a1e28"}`,background:section===id?"#4ade8015":"transparent",color:section===id?"#4ade80":"#556",cursor:"pointer",fontFamily:"inherit"}}>{lbl}</button>
+  )
+
+  // Feature table editor
+  const FeatureTable = ({ rows, setRows, color }) => (
+    <div>
+      {rows.map((f, i) => (
+        <div key={i} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 2fr auto",gap:4,marginBottom:4,alignItems:"center"}}>
+          <input value={f.name||""} onChange={e=>{const n=[...rows];n[i]={...n[i],name:e.target.value};setRows(n)}} placeholder="Name"
+            style={{background:"#0d1117",border:"1px solid #1a1e28",borderRadius:3,padding:"3px 6px",color:"#e0e0e8",fontFamily:"monospace",fontSize:10,outline:"none"}}/>
+          <input value={f.lat||""} onChange={e=>{const n=[...rows];n[i]={...n[i],lat:parseFloat(e.target.value)||0};setRows(n)}} placeholder="Lat" type="number" step="0.0001"
+            style={{background:"#0d1117",border:"1px solid #1a1e28",borderRadius:3,padding:"3px 6px",color:"#e0e0e8",fontFamily:"monospace",fontSize:10,outline:"none"}}/>
+          <input value={f.lng||""} onChange={e=>{const n=[...rows];n[i]={...n[i],lng:parseFloat(e.target.value)||0};setRows(n)}} placeholder="Lng" type="number" step="0.0001"
+            style={{background:"#0d1117",border:"1px solid #1a1e28",borderRadius:3,padding:"3px 6px",color:"#e0e0e8",fontFamily:"monospace",fontSize:10,outline:"none"}}/>
+          <input value={f.note||""} onChange={e=>{const n=[...rows];n[i]={...n[i],note:e.target.value};setRows(n)}} placeholder="Note"
+            style={{background:"#0d1117",border:"1px solid #1a1e28",borderRadius:3,padding:"3px 6px",color:"#e0e0e8",fontFamily:"monospace",fontSize:10,outline:"none"}}/>
+          <button onClick={()=>setRows(rows.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:12,padding:"0 4px"}}>✕</button>
+        </div>
+      ))}
+      <button onClick={()=>setRows([...rows,{name:"",lat:0,lng:0,note:""}])}
+        style={{marginTop:4,padding:"3px 10px",borderRadius:4,fontSize:9,border:`1px solid ${color}44`,background:"transparent",color,cursor:"pointer",fontFamily:"monospace"}}>
+        + Add row
+      </button>
+    </div>
+  )
+
+  return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+      {/* Section nav */}
+      <div style={{flexShrink:0,padding:"10px 18px 8px",borderBottom:"1px solid #111820",display:"flex",gap:6,flexWrap:"wrap"}}>
+        {sectionBtn("jurisdiction","📍 Jurisdiction")}
+        {sectionBtn("nws","🌩 NWS")}
+        {sectionBtn("kb","📚 Knowledge Base")}
+        {sectionBtn("mappoints","📍 Map Points")}
+      </div>
+
+      <div style={{flex:1,overflowY:"auto",padding:"14px 18px"}}>
+
+        {/* Jurisdiction */}
+        {section==="jurisdiction" && (
+          <div>
+            <div style={{color:"#4ade80",fontWeight:700,marginBottom:10}}>📍 Jurisdiction Configuration</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div>{label("JURISDICTION NAME")}{inp(jName,setJName,"text","e.g. Virginia Beach")}</div>
+              <div>{label("SHORT NAME")}{inp(jShort,setJShort,"text","e.g. VB")}</div>
+              <div>{label("STATE CODE (2-letter)")}{inp(jState,setJState,"text","e.g. VA")}</div>
+              <div>{label("MAP ZOOM (8-15)")}{inp(jZoom,setJZoom,"number")}</div>
+              <div>{label("CENTER LATITUDE")}{inp(jLat,setJLat,"number","e.g. 36.8529")}</div>
+              <div>{label("CENTER LONGITUDE")}{inp(jLng,setJLng,"number","e.g. -75.9780")}</div>
+            </div>
+            {label("SOCRATA OPEN DATA DOMAIN")}
+            {inp(jSocrata, setJSocrata, "text", "e.g. data.virginiabeach.gov")}
+            <div style={{fontSize:9,color:"#446",marginTop:3}}>Find your city's domain at <a href="https://opendatanetwork.com" target="_blank" rel="noopener noreferrer" style={{color:"#60a5fa"}}>opendatanetwork.com</a></div>
+          </div>
+        )}
+
+        {/* NWS */}
+        {section==="nws" && (
+          <div>
+            <div style={{color:"#60a5fa",fontWeight:700,marginBottom:10}}>🌩 National Weather Service</div>
+            <div style={{marginBottom:10}}>
+              <button onClick={discoverNWS} disabled={discovering}
+                style={{padding:"5px 14px",borderRadius:4,fontSize:10,border:"1px solid #60a5fa44",background:"transparent",color:"#60a5fa",cursor:"pointer",fontFamily:"monospace",opacity:discovering?0.5:1}}>
+                {discovering?"…":"🔍 Auto-discover from coordinates"}
+              </button>
+              {discoverMsg && <span style={{marginLeft:8,fontSize:9.5,color:discoverMsg.startsWith("✓")?"#4ade80":"#f87171"}}>{discoverMsg}</span>}
+              <div style={{fontSize:9,color:"#446",marginTop:4}}>Uses the lat/lng from the Jurisdiction tab to find your NWS office and grid coordinates automatically.</div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              <div>{label("NWS OFFICE (e.g. AKQ, OKX, LWX)")}{inp(jOffice,setJOffice,"text","e.g. AKQ")}</div>
+              <div>{label("GRID X")}{inp(jGX,setJGX,"number")}</div>
+              <div>{label("GRID Y")}{inp(jGY,setJGY,"number")}</div>
+            </div>
+            <div style={{marginTop:8,padding:"8px 10px",background:"#0d1117",borderRadius:6,border:"1px solid #1a1e28",fontSize:9.5,color:"#556"}}>
+              Preview URLs that will be used:
+              <div style={{color:"#4ade8088",marginTop:4,wordBreak:"break-all"}}>
+                {`https://api.weather.gov/alerts/active?area=${jState.toUpperCase()}`}<br/>
+                {`https://api.weather.gov/gridpoints/${jOffice}/${jGX},${jGY}/forecast`}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Knowledge Base */}
+        {section==="kb" && (
+          <div>
+            <div style={{color:"#a78bfa",fontWeight:700,marginBottom:6}}>📚 Knowledge Base Text</div>
+            <div style={{fontSize:9.5,color:"#556",marginBottom:10}}>This text is injected into the AI system prompt. Be specific — include actual zone names, street names, and operational details.</div>
+            {[
+              ["FLOOD ZONES", kbFlood, setKbFlood, "Zone A: ...\nZone AE: ...\nList your FEMA flood zones and key affected areas"],
+              ["EVACUATION ZONES", kbEvac, setKbEvac, "Zone 1: ...\nDescribe your evacuation zone system"],
+              ["CRITICAL INFRASTRUCTURE", kbInfra, setKbInfra, "Hospitals: ...\nPower: ...\nSubway/Transit: ..."],
+              ["HAZARD PROFILES", kbHazard, setKbHazard, "HURRICANES: ...\nFLOODING: ...\nEXTREME HEAT: ..."],
+              ["CONTACTS & RESOURCES", kbResources, setKbResources, "Emergency Management: 555-1234\nFire: 911 | Police: 911\n..."],
+            ].map(([lbl, val, set, ph]) => (
+              <div key={lbl} style={{marginBottom:10}}>
+                {label(lbl)}
+                <textarea value={val} rows={5} onChange={e=>set(e.target.value)} placeholder={ph}
+                  style={{background:"#0d1117",border:"1px solid #1a1e28",borderRadius:4,padding:"6px 8px",color:"#e0e0e8",fontFamily:"monospace",fontSize:10,outline:"none",width:"100%",resize:"vertical",lineHeight:1.6,boxSizing:"border-box"}} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Map Points */}
+        {section==="mappoints" && (
+          <div>
+            <div style={{color:"#fb923c",fontWeight:700,marginBottom:6}}>📍 Map Points</div>
+            <div style={{fontSize:9.5,color:"#556",marginBottom:10}}>Edit the markers that appear on the operational map. Columns: Name · Latitude · Longitude · Note</div>
+            {[
+              ["🏥 TRAUMA CENTERS", mpHospitals, setMpHospitals, "#f87171"],
+              ["🏫 EVACUATION SHELTERS", mpShelters, setMpShelters, "#60a5fa"],
+              ["📡 STREAM GAUGES", mpGauges, setMpGauges, "#4ade80"],
+              ["🏛 EOC / COMMAND POSTS", mpEoc, setMpEoc, "#facc15"],
+              ["💧 FLOOD RISK AREAS", mpFlood, setMpFlood, "#fb923c"],
+            ].map(([lbl, rows, setRows, color]) => (
+              <div key={lbl} style={{marginBottom:14}}>
+                <div style={{fontSize:9,color,fontWeight:700,letterSpacing:"0.06em",marginBottom:5}}>{lbl}</div>
+                <FeatureTable rows={rows} setRows={setRows} color={color} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Save bar */}
+      <div style={{flexShrink:0,padding:"10px 18px",borderTop:"1px solid #111820",background:"#090c12",display:"flex",gap:8,alignItems:"center"}}>
+        <button onClick={handleSave}
+          style={{padding:"7px 20px",borderRadius:5,background:saved?"#4ade80":"#e8372c",border:"none",color:"#fff",fontFamily:"monospace",fontSize:11,fontWeight:700,cursor:"pointer",transition:"background 0.2s"}}>
+          {saved?"✓ Saved — reloading…":"💾 Save & Apply"}
+        </button>
+        <button onClick={onReset}
+          style={{padding:"7px 14px",borderRadius:5,background:"transparent",border:"1px solid #1a1e28",color:"#556",fontFamily:"monospace",fontSize:10,cursor:"pointer"}}>
+          Reset to defaults
+        </button>
+        <span style={{fontSize:9,color:"#334",marginLeft:4}}>Saved to browser localStorage · No redeploy needed</span>
+      </div>
     </div>
   )
 }
