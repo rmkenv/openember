@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react"
-import { MAP_LAYERS } from "../data/nyc.js"
+import { MAP_LAYERS as NYC_MAP_LAYERS } from "../data/nyc.js"
 
 const TILE_URL  = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
 const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
@@ -115,7 +115,8 @@ function buildPopupHTML(color, icon, f, reading) {
   </div>`
 }
 
-export default function MapPanel({ activeLayers, onMarkerClick, showRadar, showWind, liveReadings = {} }) {
+export default function MapPanel({ activeLayers, onMarkerClick, showRadar, showWind, liveReadings = {}, mapLayers }) {
+  const MAP_LAYERS = (mapLayers && Object.keys(mapLayers).length) ? mapLayers : NYC_MAP_LAYERS
   const mapRef     = useRef(null)
   const leafletRef = useRef(null)
   const layerRefs  = useRef({})
@@ -156,15 +157,20 @@ export default function MapPanel({ activeLayers, onMarkerClick, showRadar, showW
 
       // ── Marker layers ──────────────────────────────────────────────────────
       for (const [key, layer] of Object.entries(MAP_LAYERS)) {
-        const group = L.layerGroup()
-        layer.features.forEach(f => {
-          const marker = L.marker([f.lat, f.lng], { icon: makeIcon(L, layer.color, layer.icon) })
+        const group    = L.layerGroup()
+        const features = Array.isArray(layer.features) ? layer.features : []
+        const lColor   = layer.color  || "#60a5fa"
+        const lIcon    = layer.icon   || "📍"
+        const lLabel   = layer.label  || key
+        features.forEach(f => {
+          if (!f.lat || !f.lng) return   // skip malformed features
+          const marker = L.marker([f.lat, f.lng], { icon: makeIcon(L, lColor, lIcon) })
           marker._emberKey     = key
           marker._emberFeature = f
-          marker._emberColor   = layer.color
-          marker._emberIcon    = layer.icon
-          marker.bindPopup(buildPopupHTML(layer.color, layer.icon, f, null))
-          marker.on("click", () => onMarkerClick?.({ ...f, layerLabel: layer.label, color: layer.color }))
+          marker._emberColor   = lColor
+          marker._emberIcon    = lIcon
+          marker.bindPopup(buildPopupHTML(lColor, lIcon, f, null))
+          marker.on("click", () => onMarkerClick?.({ ...f, layerLabel: lLabel, color: lColor }))
           group.addLayer(marker)
         })
         layerRefs.current[key] = group

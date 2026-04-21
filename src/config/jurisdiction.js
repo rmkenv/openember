@@ -319,7 +319,7 @@ export const MAP_LAYERS = {
       }
     ]
   },
-  "flood_risk": {
+  "floodRisk": {
     "label": "Flood Risk Areas",
     "color": "#fb923c",
     "icon": "💧",
